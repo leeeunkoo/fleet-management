@@ -366,7 +366,7 @@ impl InfluxWriter {
                 .client
                 .write(
                     self.influx_con.bucket.as_str(),
-                    measurements[..].try_into().unwrap(),
+                    measurements[..].try_into().expect("measurements slice should be non-empty"),
                 )
                 .await
             {
@@ -451,7 +451,7 @@ impl InfluxWriter {
                 .client
                 .write(
                     self.influx_con.bucket.as_str(),
-                    measurements[..].try_into().unwrap(),
+                    measurements[..].try_into().expect("measurements slice should be non-empty"),
                 )
                 .await
             {
