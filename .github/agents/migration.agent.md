@@ -5,7 +5,7 @@
 # For format details, see: https://gh.io/customagents/config
 
 name:
-description:
+description:  기존 코드에 새로운 기능을 마이그레이션하기 위한 전용 에이전트
 ---
 
 # My Agent
