@@ -52,12 +52,32 @@ pub const FIELD_TOTAL_ELECTRIC_MOTOR_HOURS: &str = "totalElectricMotorHours";
 pub const FIELD_TOTAL_ENGINE_HOURS: &str = "totalEngineHours";
 pub const FIELD_WHEEL_BASED_SPEED: &str = "wheelBasedSpeed";
 
+// PULLPIRI workload fields
+pub const FIELD_WORKLOAD_NAME: &str = "workloadName";
+pub const FIELD_WORKLOAD_STATE: &str = "workloadState";
+pub const FIELD_WORKLOAD_CONTAINER_ID: &str = "containerId";
+pub const FIELD_WORKLOAD_STARTED_AT: &str = "startedAt";
+pub const FIELD_WORKLOAD_FINISHED_AT: &str = "finishedAt";
+pub const FIELD_WORKLOAD_ERROR_MESSAGE: &str = "errorMessage";
+
+// PULLPIRI scenario fields
+pub const FIELD_SCENARIO_NAME: &str = "scenarioName";
+pub const FIELD_SCENARIO_STATE: &str = "scenarioState";
+pub const FIELD_SCENARIO_TRIGGER_COUNT: &str = "triggerCount";
+pub const FIELD_SCENARIO_LAST_TRIGGERED: &str = "lastTriggered";
+pub const FIELD_SCENARIO_TARGET_WORKLOAD: &str = "targetWorkload";
+
 pub const MEASUREMENT_HEADER: &str = "header";
 pub const MEASUREMENT_SNAPSHOT: &str = "snapshot";
+pub const MEASUREMENT_PULLPIRI_WORKLOAD: &str = "pullpiri_workload";
+pub const MEASUREMENT_PULLPIRI_SCENARIO: &str = "pullpiri_scenario";
 
 pub const TAG_TRIGGER: &str = "trigger";
 pub const TAG_VIN: &str = "vin";
+pub const TAG_VEHICLE_ID: &str = "vehicleId";
 
 pub mod connection;
+#[cfg(feature = "writer")]
+pub mod pullpiri;
 #[cfg(feature = "writer")]
 pub mod writer;

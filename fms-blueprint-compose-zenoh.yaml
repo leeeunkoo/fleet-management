@@ -35,6 +35,9 @@ services:
 
   fms-consumer:
     command: "zenoh -c /zenoh-config.json5"
+    environment:
+      TOPIC_FILTER: "up://*/D100/1/D100"
+      PULLPIRI_TOPIC_FILTER: "up://*/D200/1/D200"
     depends_on:
       fms-zenoh-router:
         condition: service_started

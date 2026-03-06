@@ -32,6 +32,7 @@ readme.workspace = true
 [dependencies]
 clap = { workspace = true, features = ["std", "derive", "env"] }
 fms-proto = { workspace = true, optional = true }
+prost = { workspace = true, optional = true }
 protobuf = { workspace = true, optional = true }
 influxrs = { workspace = true, features = ["client"] }
 isahc = { version = "1.7", default-features = false, features = [
@@ -44,4 +45,4 @@ log = { workspace = true }
 
 [features]
 default = ["writer"]
-writer = ["dep:fms-proto", "dep:protobuf"]
+writer = ["dep:fms-proto", "dep:protobuf", "dep:prost"]
