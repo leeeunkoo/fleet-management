@@ -852,6 +852,8 @@ dependencies = [
  "influx-client",
  "log",
  "prost 0.13.5",
+ "serde",
+ "serde_json",
  "tokio",
  "up-rust",
  "up-transport-hono-kafka",

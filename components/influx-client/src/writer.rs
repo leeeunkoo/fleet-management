@@ -415,6 +415,17 @@ impl InfluxWriter {
 
         let mut measurements: Vec<Measurement> = Vec::new();
 
+        // Always write basic status measurement
+        let basic_measurement = Measurement::builder("pullpiri_status")
+            .tag("vehicle_id", &pullpiri_status.vehicle_id)
+            .field("active", true)
+            .field("timestamp", pullpiri_status.timestamp)
+            .build()
+            .expect("failed to build pullpiri_status measurement");
+        
+        debug!("writing pullpiri_status measurement to influxdb for vehicle: {}", pullpiri_status.vehicle_id);
+        measurements.push(basic_measurement);
+
         // Build workload measurements
         for workload in &pullpiri_status.workloads {
             if let Some(measurement) = build_workload_measurement(

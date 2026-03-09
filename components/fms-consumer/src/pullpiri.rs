@@ -22,13 +22,20 @@
 //! Receives PULLPIRI status from settingsservice and stores it in InfluxDB.
 
 use log::{debug, warn};
-use prost::Message;
+use serde::Deserialize;
 use std::sync::Arc;
 
 use up_rust::{UListener, UMessage};
 
 use influx_client::pullpiri::PullpiriStatus;
 use influx_client::writer::InfluxWriter;
+
+/// Simple JSON structure for pullpiri status
+#[derive(Deserialize)]
+struct PullpiriJsonStatus {
+    vehicle_id: String,
+    timestamp: i64,
+}
 
 /// PULLPIRI status listener
 ///
@@ -47,7 +54,7 @@ impl PullpiriStatusListener {
 #[async_trait::async_trait]
 impl UListener for PullpiriStatusListener {
     async fn on_receive(&self, msg: UMessage) {
-        // Extract payload bytes and decode using prost
+        // Extract payload bytes and decode as JSON
         let payload = match &msg.payload {
             Some(bytes) => bytes,
             None => {
@@ -56,21 +63,28 @@ impl UListener for PullpiriStatusListener {
             }
         };
 
-        match PullpiriStatus::decode(payload.as_ref()) {
-            Ok(pullpiri_status) => {
+        // Parse JSON payload
+        match serde_json::from_slice::<PullpiriJsonStatus>(payload.as_ref()) {
+            Ok(json_status) => {
                 debug!(
-                    "Received PULLPIRI status from {}: {} workloads, {} scenarios",
-                    pullpiri_status.vehicle_id,
-                    pullpiri_status.workloads.len(),
-                    pullpiri_status.scenarios.len()
+                    "Received PULLPIRI status from {}: timestamp={}",
+                    json_status.vehicle_id, json_status.timestamp
                 );
+
+                // Convert to PullpiriStatus for InfluxDB
+                let pullpiri_status = PullpiriStatus {
+                    vehicle_id: json_status.vehicle_id,
+                    timestamp: json_status.timestamp,
+                    workloads: vec![],
+                    scenarios: vec![],
+                };
 
                 self.influx_writer
                     .write_pullpiri_status(&pullpiri_status)
                     .await;
             }
             Err(e) => {
-                warn!("Failed to parse PullpiriStatus: {}", e);
+                warn!("Failed to parse PULLPIRI JSON: {}", e);
             }
         }
     }
