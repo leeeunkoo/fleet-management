@@ -50,6 +50,7 @@ fms-zenoh = { path = "fms-zenoh" }
 influx-client = { path = "influx-client", default-features = false }
 influxrs = { version = "3.0.1", default-features = false }
 log = { version = "0.4.28" }
+prost = { version = "0.13" }
 protobuf = { version = "3.7.2" }
 # tokio does not enable features by default
 tokio = { version = "1.48" }

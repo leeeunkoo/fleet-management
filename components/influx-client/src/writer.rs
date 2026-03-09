@@ -183,6 +183,67 @@ fn build_snapshot_measurement(
     }
 }
 
+fn build_workload_measurement(
+    vehicle_id: &str,
+    timestamp: i64,
+    workload: &crate::pullpiri::WorkloadStatus,
+) -> Option<Measurement> {
+    let mut builder = Measurement::builder(crate::MEASUREMENT_PULLPIRI_WORKLOAD)
+        .tag(crate::TAG_VEHICLE_ID, vehicle_id)
+        .field(crate::FIELD_CREATED_DATE_TIME, timestamp as u128)
+        .field(crate::FIELD_WORKLOAD_NAME, workload.name.clone())
+        .field(crate::FIELD_WORKLOAD_STATE, workload.state.clone());
+
+    if let Some(ref container_id) = workload.container_id {
+        builder = builder.field(crate::FIELD_WORKLOAD_CONTAINER_ID, container_id.clone());
+    }
+    if let Some(started_at) = workload.started_at {
+        builder = builder.field(crate::FIELD_WORKLOAD_STARTED_AT, started_at);
+    }
+    if let Some(finished_at) = workload.finished_at {
+        builder = builder.field(crate::FIELD_WORKLOAD_FINISHED_AT, finished_at);
+    }
+    if let Some(ref error_message) = workload.error_message {
+        builder = builder.field(crate::FIELD_WORKLOAD_ERROR_MESSAGE, error_message.clone());
+    }
+
+    match builder.build() {
+        Ok(measurement) => Some(measurement),
+        Err(e) => {
+            debug!("failed to create pullpiri_workload Measurement: {e}");
+            None
+        }
+    }
+}
+
+fn build_scenario_measurement(
+    vehicle_id: &str,
+    timestamp: i64,
+    scenario: &crate::pullpiri::ScenarioStatus,
+) -> Option<Measurement> {
+    let mut builder = Measurement::builder(crate::MEASUREMENT_PULLPIRI_SCENARIO)
+        .tag(crate::TAG_VEHICLE_ID, vehicle_id)
+        .field(crate::FIELD_CREATED_DATE_TIME, timestamp as u128)
+        .field(crate::FIELD_SCENARIO_NAME, scenario.name.clone())
+        .field(crate::FIELD_SCENARIO_STATE, scenario.state.clone())
+        .field(crate::FIELD_SCENARIO_TRIGGER_COUNT, scenario.trigger_count);
+
+    if let Some(last_triggered) = scenario.last_triggered {
+        builder = builder.field(crate::FIELD_SCENARIO_LAST_TRIGGERED, last_triggered);
+    }
+    if let Some(ref target_workload) = scenario.target_workload {
+        builder = builder.field(crate::FIELD_SCENARIO_TARGET_WORKLOAD, target_workload.clone());
+    }
+
+    match builder.build() {
+        Ok(measurement) => Some(measurement),
+        Err(e) => {
+            debug!("failed to create pullpiri_scenario Measurement: {e}");
+            None
+        }
+    }
+}
+
 /// A facade to an InfluxDB server for publishing Vehicle status information.
 pub struct InfluxWriter {
     influx_con: InfluxConnection,
@@ -305,11 +366,96 @@ impl InfluxWriter {
                 .client
                 .write(
                     self.influx_con.bucket.as_str(),
-                    measurements[..].try_into().unwrap(),
+                    measurements[..].try_into().expect("measurements slice should be non-empty"),
                 )
                 .await
             {
                 warn!("failed to write data to influx: {e}");
+            }
+        }
+    }
+
+    /// Writes PULLPIRI status information as measurements to the InfluxDB server.
+    ///
+    /// The measurements are being written to the *bucket* in the *organization* that have been
+    /// configured via command line arguments and/or environment variables passed in to [`self::InfluxWriter::new()`].
+    ///
+    /// This function writes PULLPIRI status to InfluxDB by means of two measurements:
+    ///
+    /// * *pullpiri_workload* - contains workload status information:
+    ///
+    ///   | Type  | Name            | Description                      |
+    ///   | ----- | --------------- | -------------------------------- |
+    ///   | tag   | vehicleId       | The vehicle's identifier.        |
+    ///   | field | workloadName    | Name of the workload.            |
+    ///   | field | workloadState   | Current state of the workload.   |
+    ///   | field | containerId     | Container ID (optional).         |
+    ///   | field | startedAt       | Start timestamp (optional).      |
+    ///   | field | finishedAt      | Finish timestamp (optional).     |
+    ///   | field | errorMessage    | Error message (optional).        |
+    ///
+    /// * *pullpiri_scenario* - contains scenario status information:
+    ///
+    ///   | Type  | Name            | Description                      |
+    ///   | ----- | --------------- | -------------------------------- |
+    ///   | tag   | vehicleId       | The vehicle's identifier.        |
+    ///   | field | scenarioName    | Name of the scenario.            |
+    ///   | field | scenarioState   | Current state of the scenario.   |
+    ///   | field | triggerCount    | Number of times triggered.       |
+    ///   | field | lastTriggered   | Last trigger timestamp (optional). |
+    ///   | field | targetWorkload  | Target workload name (optional). |
+    pub async fn write_pullpiri_status(
+        &self,
+        pullpiri_status: &crate::pullpiri::PullpiriStatus,
+    ) {
+        if pullpiri_status.vehicle_id.is_empty() {
+            debug!("ignoring PULLPIRI status without vehicle ID ...");
+            return;
+        }
+
+        let mut measurements: Vec<Measurement> = Vec::new();
+
+        // Build workload measurements
+        for workload in &pullpiri_status.workloads {
+            if let Some(measurement) = build_workload_measurement(
+                &pullpiri_status.vehicle_id,
+                pullpiri_status.timestamp,
+                workload,
+            ) {
+                debug!(
+                    "writing pullpiri_workload measurement to influxdb for workload: {}",
+                    workload.name
+                );
+                measurements.push(measurement);
+            }
+        }
+
+        // Build scenario measurements
+        for scenario in &pullpiri_status.scenarios {
+            if let Some(measurement) = build_scenario_measurement(
+                &pullpiri_status.vehicle_id,
+                pullpiri_status.timestamp,
+                scenario,
+            ) {
+                debug!(
+                    "writing pullpiri_scenario measurement to influxdb for scenario: {}",
+                    scenario.name
+                );
+                measurements.push(measurement);
+            }
+        }
+
+        if !measurements.is_empty() {
+            if let Err(e) = self
+                .influx_con
+                .client
+                .write(
+                    self.influx_con.bucket.as_str(),
+                    measurements[..].try_into().expect("measurements slice should be non-empty"),
+                )
+                .await
+            {
+                warn!("failed to write PULLPIRI data to influx: {e}");
             }
         }
     }

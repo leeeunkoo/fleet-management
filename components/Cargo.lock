@@ -851,6 +851,7 @@ dependencies = [
  "fms-zenoh",
  "influx-client",
  "log",
+ "prost 0.13.5",
  "tokio",
  "up-rust",
  "up-transport-hono-kafka",
@@ -1366,6 +1367,7 @@ dependencies = [
  "influxrs",
  "isahc",
  "log",
+ "prost 0.13.5",
  "protobuf",
 ]
 
@@ -2270,6 +2272,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "prost"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2796faa41db3ec313a31f7624d9286acf277b52de526150b7e69f3debf891ee5"
+dependencies = [
+ "bytes",
+ "prost-derive 0.13.5",
+]
+
+[[package]]
 name = "prost-build"
 version = "0.11.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2312,6 +2324,19 @@ checksum = "81bddcdb20abf9501610992b6759a4c888aef7d1a7247ef75e2404275ac24af1"
 dependencies = [
  "anyhow",
  "itertools 0.12.1",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.111",
+]
+
+[[package]]
+name = "prost-derive"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
+dependencies = [
+ "anyhow",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "syn 2.0.111",

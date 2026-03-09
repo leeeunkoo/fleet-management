@@ -46,6 +46,7 @@ fms-proto = { workspace = true }
 fms-zenoh = { workspace = true }
 influx-client = { workspace = true, features = ["writer"] }
 log = { workspace = true }
+prost = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 up-rust = { workspace = true }
 up-transport-hono-kafka = { workspace = true }

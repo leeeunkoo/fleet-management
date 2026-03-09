@@ -32,8 +32,11 @@ use up_rust::{UListener, UMessage, UTransport, UUri};
 use up_transport_hono_kafka::{HonoKafkaTransport, HonoKafkaTransportConfig};
 use up_transport_zenoh::UPTransportZenoh;
 
+mod pullpiri;
+use pullpiri::PullpiriStatusListener;
+
 struct VehicleStatusListener {
-    influx_writer: InfluxWriter,
+    influx_writer: Arc<InfluxWriter>,
 }
 
 #[async_trait::async_trait]
@@ -57,6 +60,10 @@ struct FmsConsumerCommand {
     /// The topic URI pattern to use for consuming vehicle status events.
     #[arg(long = "topic-filter", value_name = "URI", env = "TOPIC_FILTER", default_value = "up://*/D100/1/D100", value_parser = up_rust::UUri::from_str )]
     vehicle_status_topic_filter: UUri,
+
+    /// The topic URI pattern to use for consuming PULLPIRI status events.
+    #[arg(long = "pullpiri-topic-filter", value_name = "URI", env = "PULLPIRI_TOPIC_FILTER", default_value = "up://*/D200/1/D200", value_parser = up_rust::UUri::from_str )]
+    pullpiri_status_topic_filter: UUri,
 
     /// The local uService address.
     #[arg(long = "uservice-uri", value_name = "URI", env = "USERVICE_URI", default_value = "up://fms-consumer/D101/1/0", value_parser = up_rust::UUri::from_str )]
@@ -97,16 +104,36 @@ pub async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    let influx_writer = InfluxWriter::new(&command.influxdb_connection)?;
-    let listener = Arc::new(VehicleStatusListener { influx_writer });
+    let influx_writer = Arc::new(InfluxWriter::new(&command.influxdb_connection)?);
+
+    // Register Vehicle Status listener (existing)
+    let vehicle_listener = Arc::new(VehicleStatusListener {
+        influx_writer: influx_writer.clone(),
+    });
     info!(
         "Registering listener for vehicle status events [source filter: {}]",
         &command.vehicle_status_topic_filter.to_uri(false)
     );
     transport
-        .register_listener(&command.vehicle_status_topic_filter, None, listener)
+        .register_listener(&command.vehicle_status_topic_filter, None, vehicle_listener)
         .await
         .map_err(Box::new)?;
+
+    // Register PULLPIRI Status listener (new)
+    let pullpiri_listener = Arc::new(PullpiriStatusListener::new(influx_writer.clone()));
+    info!(
+        "Registering listener for PULLPIRI status events [source filter: {}]",
+        &command.pullpiri_status_topic_filter.to_uri(false)
+    );
+    transport
+        .register_listener(
+            &command.pullpiri_status_topic_filter,
+            None,
+            pullpiri_listener,
+        )
+        .await
+        .map_err(Box::new)?;
+
     // do not let the Notifier that we use to receive and process
     // Vehicle status notifications go out of scope
     thread::park();
