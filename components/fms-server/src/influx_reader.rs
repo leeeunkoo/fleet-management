@@ -91,6 +91,37 @@ fn unpack_driver_working_state(value: Option<&String>) -> Option<DriverWorkingSt
     None
 }
 
+/// Sanitizes a string value for use in Flux queries to prevent injection attacks.
+/// Escapes double quotes and backslashes in the input.
+fn sanitize_flux_value(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// Builds a VIN filter clause for Flux queries.
+/// Uses TAG_VEHICLE_ID for PULLPIRI queries.
+fn build_vehicle_id_filter(vin: Option<&str>) -> String {
+    match vin {
+        Some(v) => format!(
+            r#"filter(fn: (r) => r["{}"] == "{}")"#,
+            influx_client::TAG_VEHICLE_ID,
+            sanitize_flux_value(v)
+        ),
+        None => format!(
+            r#"filter(fn: (r) => r["{}"] =~ /.*/)"#,
+            influx_client::TAG_VEHICLE_ID
+        ),
+    }
+}
+
+/// Returns a time range clause for Flux queries based on latest_only flag.
+fn get_pullpiri_time_range(latest_only: bool) -> &'static str {
+    if latest_only {
+        "range(start: -1h)"
+    } else {
+        "range(start: -24h)"
+    }
+}
+
 pub struct InfluxReader {
     influx_con: InfluxConnection,
 }
@@ -399,24 +430,8 @@ impl InfluxReader {
         vin_filter: Option<&str>,
         latest_only: bool,
     ) -> Result<Vec<crate::pullpiri::VehiclePullpiriStatus>, InfluxError> {
-        // Query workload counts by vehicle
-        let vin_filter_clause = match vin_filter {
-            Some(vin) => format!(
-                r#"filter(fn: (r) => r["{}"] == "{}")"#,
-                influx_client::TAG_VEHICLE_ID,
-                vin
-            ),
-            None => format!(
-                r#"filter(fn: (r) => r["{}"] =~ /.*/)"#,
-                influx_client::TAG_VEHICLE_ID
-            ),
-        };
-
-        let time_range = if latest_only {
-            "range(start: -1h)".to_string()
-        } else {
-            "range(start: -24h)".to_string()
-        };
+        let vin_filter_clause = build_vehicle_id_filter(vin_filter);
+        let time_range = get_pullpiri_time_range(latest_only);
 
         // Query for workload count per vehicle
         let workload_query = influxrs::Query::new(format!(
@@ -458,11 +473,7 @@ impl InfluxReader {
             |> count()
             |> yield(name: "scenario_count")"#,
             self.influx_con.bucket,
-            if latest_only {
-                "range(start: -1h)"
-            } else {
-                "range(start: -24h)"
-            },
+            time_range,
             influx_client::MEASUREMENT_PULLPIRI_SCENARIO,
             vin_filter_clause,
             influx_client::TAG_VEHICLE_ID,
@@ -506,31 +517,16 @@ impl InfluxReader {
         state_filter: Option<&str>,
         latest_only: bool,
     ) -> Result<Vec<crate::pullpiri::WorkloadInfo>, InfluxError> {
-        let vin_filter_clause = match vin_filter {
-            Some(vin) => format!(
-                r#"filter(fn: (r) => r["{}"] == "{}")"#,
-                influx_client::TAG_VEHICLE_ID,
-                vin
-            ),
-            None => format!(
-                r#"filter(fn: (r) => r["{}"] =~ /.*/)"#,
-                influx_client::TAG_VEHICLE_ID
-            ),
-        };
+        let vin_filter_clause = build_vehicle_id_filter(vin_filter);
+        let time_range = get_pullpiri_time_range(latest_only);
 
         let state_filter_clause = match state_filter {
             Some(state) => format!(
                 r#"filter(fn: (r) => r["{}"] == "{}")"#,
                 influx_client::FIELD_WORKLOAD_STATE,
-                state
+                sanitize_flux_value(state)
             ),
             None => String::new(),
-        };
-
-        let time_range = if latest_only {
-            "range(start: -1h)"
-        } else {
-            "range(start: -24h)"
         };
 
         let mut query = influxrs::Query::new(format!(
@@ -593,31 +589,16 @@ impl InfluxReader {
         state_filter: Option<&str>,
         latest_only: bool,
     ) -> Result<Vec<crate::pullpiri::ScenarioInfo>, InfluxError> {
-        let vin_filter_clause = match vin_filter {
-            Some(vin) => format!(
-                r#"filter(fn: (r) => r["{}"] == "{}")"#,
-                influx_client::TAG_VEHICLE_ID,
-                vin
-            ),
-            None => format!(
-                r#"filter(fn: (r) => r["{}"] =~ /.*/)"#,
-                influx_client::TAG_VEHICLE_ID
-            ),
-        };
+        let vin_filter_clause = build_vehicle_id_filter(vin_filter);
+        let time_range = get_pullpiri_time_range(latest_only);
 
         let state_filter_clause = match state_filter {
             Some(state) => format!(
                 r#"filter(fn: (r) => r["{}"] == "{}")"#,
                 influx_client::FIELD_SCENARIO_STATE,
-                state
+                sanitize_flux_value(state)
             ),
             None => String::new(),
-        };
-
-        let time_range = if latest_only {
-            "range(start: -1h)"
-        } else {
-            "range(start: -24h)"
         };
 
         let mut query = influxrs::Query::new(format!(
@@ -674,5 +655,72 @@ impl InfluxReader {
                     })
                     .collect()
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_flux_value_escapes_quotes() {
+        assert_eq!(
+            sanitize_flux_value(r#"test"value"#),
+            r#"test\"value"#
+        );
+    }
+
+    #[test]
+    fn test_sanitize_flux_value_escapes_backslashes() {
+        assert_eq!(
+            sanitize_flux_value(r#"test\value"#),
+            r#"test\\value"#
+        );
+    }
+
+    #[test]
+    fn test_sanitize_flux_value_escapes_mixed() {
+        assert_eq!(
+            sanitize_flux_value(r#"test\"value"#),
+            r#"test\\\"value"#
+        );
+    }
+
+    #[test]
+    fn test_sanitize_flux_value_no_escaping_needed() {
+        assert_eq!(
+            sanitize_flux_value("normal_value_123"),
+            "normal_value_123"
+        );
+    }
+
+    #[test]
+    fn test_build_vehicle_id_filter_with_vin() {
+        let filter = build_vehicle_id_filter(Some("VIN123"));
+        assert!(filter.contains(r#"== "VIN123""#));
+        assert!(filter.contains(influx_client::TAG_VEHICLE_ID));
+    }
+
+    #[test]
+    fn test_build_vehicle_id_filter_with_malicious_vin() {
+        let filter = build_vehicle_id_filter(Some(r#"VIN" or true or ""#));
+        // Verify malicious quotes are escaped
+        assert!(filter.contains(r#"VIN\" or true or \""#));
+    }
+
+    #[test]
+    fn test_build_vehicle_id_filter_without_vin() {
+        let filter = build_vehicle_id_filter(None);
+        assert!(filter.contains("=~ /.*/"));
+    }
+
+    #[test]
+    fn test_get_pullpiri_time_range_latest() {
+        assert_eq!(get_pullpiri_time_range(true), "range(start: -1h)");
+    }
+
+    #[test]
+    fn test_get_pullpiri_time_range_full() {
+        assert_eq!(get_pullpiri_time_range(false), "range(start: -24h)");
     }
 }
