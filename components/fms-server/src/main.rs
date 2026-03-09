@@ -37,7 +37,7 @@ async fn main() {
     // parser = fms_server::add_command_line_args(parser);
     // let args = parser.get_matches();
     let args = FmsServerArgs::parse();
-    let router = fms_server::app(&args.influx_connection);
+    let router = fms_server::app(&args.influx_connection).await;
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8081").await.unwrap();
     axum::serve::serve(listener, router.into_make_service())
         .await
