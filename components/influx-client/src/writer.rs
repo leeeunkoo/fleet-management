@@ -460,3 +460,86 @@ impl InfluxWriter {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pullpiri::{PullpiriStatus, ScenarioStatus, WorkloadStatus};
+
+    #[test]
+    fn test_build_workload_measurement_required_fields() {
+        let workload = WorkloadStatus {
+            name: "test-workload".to_string(),
+            state: "RUNNING".to_string(),
+            container_id: None,
+            started_at: None,
+            finished_at: None,
+            error_message: None,
+        };
+
+        let measurement = build_workload_measurement("vehicle-001", 1234567890, &workload);
+        // Verify the measurement was created successfully with required fields
+        assert!(measurement.is_some());
+    }
+
+    #[test]
+    fn test_build_workload_measurement_optional_fields() {
+        let workload = WorkloadStatus {
+            name: "test-workload".to_string(),
+            state: "COMPLETED".to_string(),
+            container_id: Some("container-abc123".to_string()),
+            started_at: Some(1234567890),
+            finished_at: Some(1234567900),
+            error_message: Some("Test error".to_string()),
+        };
+
+        let measurement = build_workload_measurement("vehicle-001", 1234567890, &workload);
+        // Verify the measurement was created successfully with all optional fields
+        assert!(measurement.is_some());
+    }
+
+    #[test]
+    fn test_build_scenario_measurement_required_fields() {
+        let scenario = ScenarioStatus {
+            name: "test-scenario".to_string(),
+            state: "ACTIVE".to_string(),
+            trigger_count: 5,
+            last_triggered: None,
+            target_workload: None,
+        };
+
+        let measurement = build_scenario_measurement("vehicle-001", 1234567890, &scenario);
+        // Verify the measurement was created successfully with required fields
+        assert!(measurement.is_some());
+    }
+
+    #[test]
+    fn test_build_scenario_measurement_optional_fields() {
+        let scenario = ScenarioStatus {
+            name: "test-scenario".to_string(),
+            state: "TRIGGERED".to_string(),
+            trigger_count: 10,
+            last_triggered: Some(1234567895),
+            target_workload: Some("target-workload".to_string()),
+        };
+
+        let measurement = build_scenario_measurement("vehicle-001", 1234567890, &scenario);
+        // Verify the measurement was created successfully with all optional fields
+        assert!(measurement.is_some());
+    }
+
+    #[test]
+    fn test_pullpiri_status_creation_with_empty_vehicle_id() {
+        // Verify that PullpiriStatus can be created with empty vehicle_id.
+        // The actual validation (early return without writing) happens in
+        // the async write_pullpiri_status method, which cannot be tested
+        // without an actual InfluxDB connection.
+        let status = PullpiriStatus {
+            vehicle_id: "".to_string(),
+            timestamp: 1234567890,
+            workloads: vec![],
+            scenarios: vec![],
+        };
+        assert!(status.vehicle_id.is_empty());
+    }
+}
