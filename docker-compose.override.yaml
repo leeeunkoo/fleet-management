@@ -1,0 +1,18 @@
+# Override for Docker (non-swarm mode)
+networks:
+  fms-backend:
+    driver: bridge
+  fms-vehicle:
+    driver: bridge
+
+services:
+  fms-zenoh-router:
+    ports:
+      - "0.0.0.0:7447:7447"
+  
+  databroker:
+    ports:
+      - "127.0.0.1:55555:55556"
+    environment:
+      KUKSA_DATABROKER_ADDR: "0.0.0.0"
+      KUKSA_DATABROKER_PORT: "55556"

@@ -19,10 +19,10 @@
 
 networks:
   fms-backend:
-    driver: overlay
+    driver: bridge
     attachable: true
   fms-vehicle:
-    driver: overlay
+    driver: bridge
     attachable: true
 
 configs:
