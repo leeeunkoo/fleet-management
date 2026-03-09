@@ -392,4 +392,287 @@ impl InfluxReader {
                     .collect()
             })
     }
+
+    /// Retrieves PULLPIRI status summary for vehicles
+    pub async fn get_pullpiri_status(
+        &self,
+        vin_filter: Option<&str>,
+        latest_only: bool,
+    ) -> Result<Vec<crate::pullpiri::VehiclePullpiriStatus>, InfluxError> {
+        // Query workload counts by vehicle
+        let vin_filter_clause = match vin_filter {
+            Some(vin) => format!(
+                r#"filter(fn: (r) => r["{}"] == "{}")"#,
+                influx_client::TAG_VEHICLE_ID,
+                vin
+            ),
+            None => format!(
+                r#"filter(fn: (r) => r["{}"] =~ /.*/)"#,
+                influx_client::TAG_VEHICLE_ID
+            ),
+        };
+
+        let time_range = if latest_only {
+            "range(start: -1h)".to_string()
+        } else {
+            "range(start: -24h)".to_string()
+        };
+
+        // Query for workload count per vehicle
+        let workload_query = influxrs::Query::new(format!(
+            r#"from(bucket: "{}")
+            |> {}
+            |> filter(fn: (r) => r._measurement == "{}")
+            |> {}
+            |> group(columns: ["{}"])
+            |> count()
+            |> yield(name: "workload_count")"#,
+            self.influx_con.bucket,
+            time_range,
+            influx_client::MEASUREMENT_PULLPIRI_WORKLOAD,
+            vin_filter_clause,
+            influx_client::TAG_VEHICLE_ID,
+        ));
+
+        let workload_counts: std::collections::HashMap<String, i32> = self
+            .influx_con
+            .client
+            .query(workload_query)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|entry| {
+                let vehicle_id = entry.get(influx_client::TAG_VEHICLE_ID)?.to_string();
+                let count: i32 = entry.get("_value")?.parse().ok()?;
+                Some((vehicle_id, count))
+            })
+            .collect();
+
+        // Query for scenario count per vehicle
+        let scenario_query = influxrs::Query::new(format!(
+            r#"from(bucket: "{}")
+            |> {}
+            |> filter(fn: (r) => r._measurement == "{}")
+            |> {}
+            |> group(columns: ["{}"])
+            |> count()
+            |> yield(name: "scenario_count")"#,
+            self.influx_con.bucket,
+            if latest_only {
+                "range(start: -1h)"
+            } else {
+                "range(start: -24h)"
+            },
+            influx_client::MEASUREMENT_PULLPIRI_SCENARIO,
+            vin_filter_clause,
+            influx_client::TAG_VEHICLE_ID,
+        ));
+
+        let scenario_counts: std::collections::HashMap<String, i32> = self
+            .influx_con
+            .client
+            .query(scenario_query)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|entry| {
+                let vehicle_id = entry.get(influx_client::TAG_VEHICLE_ID)?.to_string();
+                let count: i32 = entry.get("_value")?.parse().ok()?;
+                Some((vehicle_id, count))
+            })
+            .collect();
+
+        // Combine results
+        let mut vehicle_ids: std::collections::HashSet<String> = workload_counts.keys().cloned().collect();
+        vehicle_ids.extend(scenario_counts.keys().cloned());
+
+        let statuses: Vec<crate::pullpiri::VehiclePullpiriStatus> = vehicle_ids
+            .into_iter()
+            .map(|vehicle_id| crate::pullpiri::VehiclePullpiriStatus {
+                vehicle_id: vehicle_id.clone(),
+                timestamp: chrono::Utc::now(),
+                workload_count: *workload_counts.get(&vehicle_id).unwrap_or(&0),
+                scenario_count: *scenario_counts.get(&vehicle_id).unwrap_or(&0),
+            })
+            .collect();
+
+        Ok(statuses)
+    }
+
+    /// Retrieves workload status from InfluxDB
+    pub async fn get_workloads(
+        &self,
+        vin_filter: Option<&str>,
+        state_filter: Option<&str>,
+        latest_only: bool,
+    ) -> Result<Vec<crate::pullpiri::WorkloadInfo>, InfluxError> {
+        let vin_filter_clause = match vin_filter {
+            Some(vin) => format!(
+                r#"filter(fn: (r) => r["{}"] == "{}")"#,
+                influx_client::TAG_VEHICLE_ID,
+                vin
+            ),
+            None => format!(
+                r#"filter(fn: (r) => r["{}"] =~ /.*/)"#,
+                influx_client::TAG_VEHICLE_ID
+            ),
+        };
+
+        let state_filter_clause = match state_filter {
+            Some(state) => format!(
+                r#"filter(fn: (r) => r["{}"] == "{}")"#,
+                influx_client::FIELD_WORKLOAD_STATE,
+                state
+            ),
+            None => String::new(),
+        };
+
+        let time_range = if latest_only {
+            "range(start: -1h)"
+        } else {
+            "range(start: -24h)"
+        };
+
+        let mut query = influxrs::Query::new(format!(
+            r#"from(bucket: "{}")"#,
+            self.influx_con.bucket
+        ))
+        .then(time_range)
+        .then(format!(
+            r#"filter(fn: (r) => r._measurement == "{}")"#,
+            influx_client::MEASUREMENT_PULLPIRI_WORKLOAD
+        ))
+        .then(&vin_filter_clause);
+
+        if !state_filter_clause.is_empty() {
+            query = query.then(&state_filter_clause);
+        }
+
+        if latest_only {
+            query = query
+                .then(r#"group(columns: ["vehicleId", "workloadName"], mode:"by")"#)
+                .then("last()");
+        }
+
+        query = query
+            .then(r#"pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")"#);
+
+        self.influx_con
+            .client
+            .query(query)
+            .await
+            .map(|measurements| {
+                measurements
+                    .into_iter()
+                    .filter_map(|entry| {
+                        let vehicle_id = entry.get(influx_client::TAG_VEHICLE_ID)?.to_string();
+                        let name = entry.get(influx_client::FIELD_WORKLOAD_NAME)?.to_string();
+                        let state = entry
+                            .get(influx_client::FIELD_WORKLOAD_STATE)
+                            .cloned()
+                            .unwrap_or_else(|| "unknown".to_string());
+
+                        Some(crate::pullpiri::WorkloadInfo {
+                            vehicle_id,
+                            name,
+                            state,
+                            container_id: entry.get(influx_client::FIELD_WORKLOAD_CONTAINER_ID).cloned(),
+                            started_at: unpack_time(entry.get(influx_client::FIELD_WORKLOAD_STARTED_AT)),
+                            finished_at: unpack_time(entry.get(influx_client::FIELD_WORKLOAD_FINISHED_AT)),
+                            error_message: entry.get(influx_client::FIELD_WORKLOAD_ERROR_MESSAGE).cloned(),
+                        })
+                    })
+                    .collect()
+            })
+    }
+
+    /// Retrieves scenario status from InfluxDB
+    pub async fn get_scenarios(
+        &self,
+        vin_filter: Option<&str>,
+        state_filter: Option<&str>,
+        latest_only: bool,
+    ) -> Result<Vec<crate::pullpiri::ScenarioInfo>, InfluxError> {
+        let vin_filter_clause = match vin_filter {
+            Some(vin) => format!(
+                r#"filter(fn: (r) => r["{}"] == "{}")"#,
+                influx_client::TAG_VEHICLE_ID,
+                vin
+            ),
+            None => format!(
+                r#"filter(fn: (r) => r["{}"] =~ /.*/)"#,
+                influx_client::TAG_VEHICLE_ID
+            ),
+        };
+
+        let state_filter_clause = match state_filter {
+            Some(state) => format!(
+                r#"filter(fn: (r) => r["{}"] == "{}")"#,
+                influx_client::FIELD_SCENARIO_STATE,
+                state
+            ),
+            None => String::new(),
+        };
+
+        let time_range = if latest_only {
+            "range(start: -1h)"
+        } else {
+            "range(start: -24h)"
+        };
+
+        let mut query = influxrs::Query::new(format!(
+            r#"from(bucket: "{}")"#,
+            self.influx_con.bucket
+        ))
+        .then(time_range)
+        .then(format!(
+            r#"filter(fn: (r) => r._measurement == "{}")"#,
+            influx_client::MEASUREMENT_PULLPIRI_SCENARIO
+        ))
+        .then(&vin_filter_clause);
+
+        if !state_filter_clause.is_empty() {
+            query = query.then(&state_filter_clause);
+        }
+
+        if latest_only {
+            query = query
+                .then(r#"group(columns: ["vehicleId", "scenarioName"], mode:"by")"#)
+                .then("last()");
+        }
+
+        query = query
+            .then(r#"pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")"#);
+
+        self.influx_con
+            .client
+            .query(query)
+            .await
+            .map(|measurements| {
+                measurements
+                    .into_iter()
+                    .filter_map(|entry| {
+                        let vehicle_id = entry.get(influx_client::TAG_VEHICLE_ID)?.to_string();
+                        let name = entry.get(influx_client::FIELD_SCENARIO_NAME)?.to_string();
+                        let state = entry
+                            .get(influx_client::FIELD_SCENARIO_STATE)
+                            .cloned()
+                            .unwrap_or_else(|| "unknown".to_string());
+                        let trigger_count = entry
+                            .get(influx_client::FIELD_SCENARIO_TRIGGER_COUNT)
+                            .and_then(|v| v.parse().ok())
+                            .unwrap_or(0);
+
+                        Some(crate::pullpiri::ScenarioInfo {
+                            vehicle_id,
+                            name,
+                            state,
+                            trigger_count,
+                            last_triggered: unpack_time(entry.get(influx_client::FIELD_SCENARIO_LAST_TRIGGERED)),
+                            target_workload: entry.get(influx_client::FIELD_SCENARIO_TARGET_WORKLOAD).cloned(),
+                        })
+                    })
+                    .collect()
+            })
+    }
 }
