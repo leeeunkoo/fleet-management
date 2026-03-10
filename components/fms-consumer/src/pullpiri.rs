@@ -30,11 +30,22 @@ use up_rust::{UListener, UMessage};
 use influx_client::pullpiri::PullpiriStatus;
 use influx_client::writer::InfluxWriter;
 
+/// Scenario status from pullpiri
+#[derive(Deserialize, Debug, Clone)]
+struct ScenarioStatus {
+    name: String,
+    state: String,
+}
+
 /// Simple JSON structure for pullpiri status
 #[derive(Deserialize)]
 struct PullpiriJsonStatus {
     vehicle_id: String,
     timestamp: i64,
+    #[serde(default)]
+    scenarios: Vec<ScenarioStatus>,
+    #[serde(default)]
+    scenario_count: usize,
 }
 
 /// PULLPIRI status listener
@@ -67,16 +78,29 @@ impl UListener for PullpiriStatusListener {
         match serde_json::from_slice::<PullpiriJsonStatus>(payload.as_ref()) {
             Ok(json_status) => {
                 debug!(
-                    "Received PULLPIRI status from {}: timestamp={}",
-                    json_status.vehicle_id, json_status.timestamp
+                    "Received PULLPIRI status from {}: timestamp={}, scenarios={}",
+                    json_status.vehicle_id, json_status.timestamp, json_status.scenario_count
                 );
+
+                // Convert scenarios to the format expected by InfluxDB
+                let scenarios: Vec<influx_client::pullpiri::ScenarioStatus> = json_status
+                    .scenarios
+                    .iter()
+                    .map(|s| influx_client::pullpiri::ScenarioStatus {
+                        name: s.name.clone(),
+                        state: s.state.clone(),
+                        trigger_count: 0,
+                        last_triggered: None,
+                        target_workload: None,
+                    })
+                    .collect();
 
                 // Convert to PullpiriStatus for InfluxDB
                 let pullpiri_status = PullpiriStatus {
                     vehicle_id: json_status.vehicle_id,
                     timestamp: json_status.timestamp,
                     workloads: vec![],
-                    scenarios: vec![],
+                    scenarios,
                 };
 
                 self.influx_writer
